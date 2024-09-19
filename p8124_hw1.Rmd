@@ -1,0 +1,49 @@
+---
+title: "p8124_hw1"
+author: "Yixiao Sun"
+date: "2024-09-17"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Question1
+```{r}
+install.packages("dagitty")
+library(dagitty)
+
+#a)
+dag <- dagitty('dag {
+    C->E;C->B;C->F;C->H;D->E;E->A;E->F;B->A;G->B;G->H;F->G;F->H
+}')
+
+
+paths_list <- paths(dag, from = "C", to = "H")
+print(paths_list)
+
+#b)
+d_sep_result <- dseparated(dag, X = "E", Y = "G", Z = c("A", "B"))
+print(d_sep_result)
+
+#c)
+independencies <- impliedConditionalIndependencies(dag)
+print(independencies)
+
+independencies2 <- impliedConditionalIndependencies(dag, type = "all.pairs")
+print(independencies2)
+
+
+#d) 
+library(simsem)
+set.seed(111)
+simulated_data <- simulateSEM(dag,b.lower = -0.7,b.upper = 0.7, N = 10000)
+all_variables <- colnames(simulated_data)
+markov_blanket <- markovBlanket(dag, "B")
+variables_in_model <- c(markov_blanket, "B")
+remaining_variables <- setdiff(all_variables, variables_in_model)
+model <- lm(B ~ ., data = simulated_data[, c(variables_in_model, remaining_variables)])
+summary(model)$coefficients
+```
+
