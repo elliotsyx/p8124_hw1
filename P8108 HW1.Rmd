@@ -1,0 +1,82 @@
+---
+title: "Survival Analysis HW1"
+author: "Yixiao Sun"
+date: "2024-09-29"
+output: pdf_document
+---
+
+
+
+### Question 2
+# Question 2 (b)
+```{r}
+library(survival)
+library(dplyr)
+library(survminer)
+data <- read.csv("~/Desktop/P8124/p8124_hw1/Q2data_extracted-1.csv")
+surv_object <- Surv(time = data$Value, event = data$Binary)
+km_fit <- survfit(surv_object ~ 1, conf.type = "plain")
+km_fit2 <- survfit(surv_object ~ 1, conf.type = "log-log")
+
+summary(km_fit)
+summary(km_fit2)
+```
+Both approaches results' lower and upper confidence bounds falls inside of the [0,1] interval.
+
+# Question 2 (c)
+```{r}
+plot(km_fit, conf.int = TRUE, main = "Kaplan-Meier Survival Curve",xlab = "Time (days)", ylab = "Survival Chance")
+```
+# Question 2 (d)
+```{r}
+km_median <- quantile(km_fit,probs = 0.5)
+km_25th <- quantile(km_fit,probs = 0.25)
+km_75th <- quantile(km_fit,probs = 0.75)
+
+print(km_median)
+print(km_25th)
+print(km_75th)
+
+plot(km_fit, conf.int = TRUE, main = "Kaplan-Meier Survival Curve",xlab = "Time (days)", ylab = "Survival Chance")
+abline(h = 0.25)
+abline(h = 0.5)
+abline(h = 0.75)
+
+summary(km_fit)
+```
+The median is 90. The 25th quantile is 22, the 75th quantile is 180.And based on the KM estimator, the median is 0.431, 25th is 0.706, 75th is 0.173.
+
+# Question 2 (e)
+```{r}
+CH <- -log(km_fit$surv)
+print(CH)
+CH_KM <- data.frame(Time = km_fit$time, Cumulative_Hazard = CH)
+print(CH_KM)
+```
+
+
+# Question 2 (f)
+```{r}
+data.frame(Time = km_fit$time, Cumulative_Hazard = cumsum(km_fit$n.event/km_fit$n.risk))
+```
+# Question 2 (g)
+```{r}
+# (i)
+CH2 <- cumsum(km_fit$n.event/km_fit$n.risk)
+CH_NA <-  data.frame(Time = km_fit$time, Cumulative_Hazard = cumsum(km_fit$n.event/km_fit$n.risk))
+plot(CH_NA$Time, CH_NA$Cumulative_Hazard, type = "smooth")
+#(ii)
+plot(log(CH_NA$Time), log(CH_NA$Cumulative_Hazard), type = "smooth")
+``` 
+Based on the two graphs above, the second plot, the log one, which is using the Weibull model, showing a better linearality compared to the exponential model. Which mean that the Weibull model might be a better choice for this dataset.
+
+# Question 2 (h)
+```{r}
+FH <- exp(-CH_NA$Cumulative_Hazard)
+data.frame(Time = CH_NA$Time,FH)
+plot(km_fit,xlab = "Time (days)", ylab = "Survival Chance")
+lines(CH_NA$Time,FH)
+```
+The Fleming-Harrington estimator line is showing on the graph.We have graphed Kaplan-Meier in the questions upper, there aren't big differences between the two lines, so the Fleming_Harrington estimator is on its agreement with the Kaplan-Merier estimator.
+
+
