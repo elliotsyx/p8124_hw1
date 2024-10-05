@@ -1,0 +1,298 @@
+---
+title: "P9120 HW1"
+author: "Yixiao Sun"
+date: "2024-10-04"
+output: pdf_document
+---
+Question 1
+```{r}
+library(boot)
+set.seed(1)
+M <- 1000 
+B <- 1000
+n <- 100
+alpha <- 0.05
+
+bootstrap_inconsistency <- function(p, mu_values) {
+  coverage_normal <- numeric(M)
+  coverage_percentile <- numeric(M)
+  coverage_hybrid <- numeric(M)
+  
+  for (m in 1:M) {
+    X_train <- matrix(rnorm(n * p, mean = rep(mu_values, each = n), sd = 1), n, p)
+    
+    X_bar <- colMeans(X_train)
+    X_max <- max(X_bar)
+    
+    X_max_bootstrap <- numeric(B)
+    
+    for (b in 1:B) {
+      bootstrap_sample <- X_train[sample(1:n, n, replace = TRUE), ]
+      X_bar_boot <- colMeans(bootstrap_sample)
+      X_max_bootstrap[b] <- max(X_bar_boot)
+    }
+    
+    sigma_hat <- sd(X_max_bootstrap)
+    ci_normal <- c(X_max - qnorm(1 - alpha / 2) * sigma_hat, 
+                   X_max + qnorm(1 - alpha / 2) * sigma_hat)
+    
+    ci_percentile <- quantile(X_max_bootstrap, probs = c(alpha / 2, 1 - alpha / 2))
+    
+    X_bar_star <- mean(X_max_bootstrap)
+    ci_hybrid <- 2 * X_max - quantile(X_max_bootstrap, probs = c(1 - alpha / 2, alpha / 2))
+    
+    mu_max <- max(mu_values)
+    coverage_normal[m] <- (mu_max >= ci_normal[1] && mu_max <= ci_normal[2])
+    coverage_percentile[m] <- (mu_max >= ci_percentile[1] && mu_max <= ci_percentile[2])
+    coverage_hybrid[m] <- (mu_max >= ci_hybrid[1] && mu_max <= ci_hybrid[2])
+  }
+  
+
+  return(c(mean(coverage_normal), mean(coverage_percentile), mean(coverage_hybrid)))
+}
+
+scenarios <- list(
+  list(p = 2, mu = c(1, 1)),
+  list(p = 2, mu = c(1, 2)),
+  list(p = 5, mu = rep(1, 5)),
+  list(p = 5, mu = 1:5),
+  list(p = 10, mu = rep(1, 10)),
+  list(p = 10, mu = 1:10)
+)
+
+results <- lapply(scenarios, function(s) bootstrap_inconsistency(s$p, s$mu))
+
+for (i in 1:length(scenarios)) {
+  cat("Scenario", i, "- p =", scenarios[[i]]$p, ", mu =", scenarios[[i]]$mu, "\n")
+  cat("Coverage Rates (Normal, Percentile, Hybrid):", results[[i]], "\n\n")
+}
+
+```
+# Based on the above results, we cansee that the coverage rates are quite different between groups, between the scenarios whose values are identical and the scenarios whose values are increasing. B D F's coverage rates seem to be consistent, but in A C E, the differences and gap between Normal Percentile and Hybrid increase as the number of 1 increases.
+
+
+
+
+Question 2
+
+Part a
+```{r}
+library(leaps)
+library(glmnet)
+set.seed(123)
+
+prostate_data <- read.table("https://hastie.su.domains/ElemStatLearn/datasets/prostate.data", header=TRUE)
+
+train <- subset(prostate_data, train == TRUE)
+test <- subset(prostate_data, train == FALSE)
+x_train <- model.matrix(lpsa ~ ., train)[,-1]
+y_train <- train$lpsa
+x_test <- model.matrix(lpsa ~ ., test)[,-1]
+y_test <- test$lpsa
+
+predict_regsubsets <- function(object, newdata, id) {
+  formula <- as.formula(object$call[[2]])
+  mat <- model.matrix(formula, newdata)
+  coefi <- coef(object, id = id)
+  mat[, names(coefi)] %*% coefi
+}
+
+best_subset_cv <- regsubsets(lpsa ~ ., data = train, nbest = 1, nvmax = 8)
+
+cv_folds <- 5
+cv_errors <- matrix(NA, cv_folds, 8)
+set.seed(123)
+
+folds <- sample(rep(1:cv_folds, length = nrow(train)))
+
+for (i in 1:cv_folds) {
+  test_indices <- which(folds == i)
+  train_fold <- train[-test_indices, ]
+  test_fold <- train[test_indices, ]
+  
+  fit <- regsubsets(lpsa ~ ., data = train_fold, nbest = 1, nvmax = 8)
+  
+  for (k in 1:8) {
+    test_preds <- predict_regsubsets(fit, test_fold, id = k)
+    cv_errors[i, k] <- mean((test_fold$lpsa - test_preds)^2)
+  }
+}
+
+mean_cv_errors <- colMeans(cv_errors)
+best_k_cv <- which.min(mean_cv_errors)
+
+best_model_cv <- regsubsets(lpsa ~ ., data = train, nbest = 1, nvmax = best_k_cv)
+
+test_preds_cv <- predict_regsubsets(best_model_cv, test, id = best_k_cv)
+test_error_cv <- mean((test$lpsa - test_preds_cv)^2)
+test_error_cv_se <- sd((test$lpsa - test_preds_cv)^2) / sqrt(nrow(test))
+
+coef(best_model_cv, id = best_k_cv)
+
+cat("Best k by CV:", best_k_cv, "\nTest Error:", test_error_cv, "\nStandard Error:", test_error_cv_se, "\n")
+
+```
+
+
+Part b
+```{r}
+set.seed(123)
+best_subset_bic <- regsubsets(lpsa ~ ., data = train, nbest = 1, nvmax = 8)
+bic_values <- summary(best_subset_bic)$bic
+best_k_bic <- which.min(bic_values)
+
+prediction_errors_bic <- rep(NA, 8)
+for (i in 1:8) {
+  coef_i <- coef(best_subset_bic, id = i)
+  predictions <- as.matrix(cbind(1, x_train[, names(coef_i)[-1], drop = FALSE])) %*% coef_i
+  prediction_errors_bic[i] <- mean((y_train- predictions)^2)
+}
+
+test_preds_bic <- predict_regsubsets(best_subset_bic, test, id = best_k_bic)
+
+test_error_bic <- mean((test$lpsa - test_preds_bic)^2)
+test_error_bic_se <- sd((test$lpsa - test_preds_bic)^2) / sqrt(nrow(test))
+
+test_errors_bic2 <- numeric(8)
+for (k in 1:8) {
+  best_model_bic <- regsubsets(lpsa ~ ., data = train, nvmax = k)
+  test_preds_bic <- predict_regsubsets(best_model_bic, test, id = k)
+  test_errors_bic2[k] <- mean((test$lpsa - test_preds_bic)^2)
+}
+test_errors_bic_se2 <- sd(test_errors_bic2)/sqrt(length(test_errors_bic2))
+
+coef(best_subset_bic, id = best_k_bic)
+
+cat("Best k by BIC:", best_k_bic, "\nTest Error:", test_error_bic, "\nStandard Error:", test_error_bic_se, "\n")
+
+```
+
+Part c
+```{r}
+set.seed(123)
+x_train <- model.matrix(lpsa ~ ., train)[,-1]
+y_train <- train$lpsa
+x_test <- model.matrix(lpsa ~ ., test)[,-1]
+y_test <- test$lpsa
+
+lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1, nfolds = 5)
+best_lambda_cv <- lasso_cv$lambda.min
+
+lasso_model_cv <- glmnet(x_train, y_train, alpha = 1, lambda = best_lambda_cv)
+
+test_preds_lasso_cv <- predict(lasso_model_cv, s = best_lambda_cv, newx = x_test)
+test_error_lasso_cv <- mean((y_test - test_preds_lasso_cv)^2)
+test_error_lasso_cv_se <- sd((y_test - test_preds_lasso_cv)^2) / sqrt(nrow(test))
+
+coef(lasso_model_cv)
+
+cat("Best Lambda by CV:", best_lambda_cv, "\nTest Error:", test_error_lasso_cv, "\nStandard Error:", test_error_lasso_cv_se, "\n")
+
+```
+
+Part d
+```{r}
+set.seed(123)
+lasso_fit <- cv.glmnet(x_train, y_train, alpha = 1)
+
+n <- nrow(x_train)
+
+bic_vals <- sapply(lasso_fit$lambda, function(lambda) {
+  fit <- glmnet(x_train, y_train, alpha = 1, lambda = lambda)
+  predictions <- predict(fit, newx = x_train)
+  mse <- mean((y_train - predictions)^2)
+  if (mse <= 0) return(Inf)
+  p <- sum(coef(fit) != 0) - 1
+  bic <- n * log(mse) + p * log(n)
+  return(bic)
+})
+best_lambda_bic <- lasso_fit$lambda[which.min(bic_vals)]
+lasso_model_bic <- glmnet(x_train, y_train, alpha = 1, lambda = best_lambda_bic)
+test_preds_lasso_bic <- predict(lasso_model_bic, s = best_lambda_bic, newx = x_test)
+
+test_error_lasso_bic <- mean((y_test - test_preds_lasso_bic)^2)
+test_error_lasso_bic_se <- sd((y_test - test_preds_lasso_bic)^2) / sqrt(nrow(test))
+
+test_errors_lasso_bic2 <- sapply(lasso_fit$lambda,function(lambda) {
+  lasso_model_bic2 <- glmnet(x_train, y_train, alpha = 1, lambda = lambda)
+  test_preds_lasso_bic2 <- predict(lasso_model_bic2, newx = x_train)
+  mean((y_train - test_preds_lasso_bic2)^2)
+})
+
+test_error_lasso_bic_se2 <- sd(test_errors_lasso_bic2) / sqrt(length(test_errors_lasso_bic2))
+
+print(test_errors_lasso_bic2)
+
+coef(lasso_model_bic)
+cat("Best Lambda by BIC:", best_lambda_bic, "\nTest Error:", test_error_lasso_bic, "\nStandard Error:", test_error_lasso_bic_se, "\n")
+```
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+plot_data_a <- data.frame(
+  Model_Complexity = 1:8,
+  Error = mean_cv_errors,
+  SE = apply(cv_errors, 2, sd) / sqrt(cv_folds),
+  Type = "Best Subset CV Error"
+)
+
+plot_data_b <- data.frame(
+  Model_Complexity = 1:8,
+  Error = prediction_errors_bic ,
+  SE = test_errors_bic_se2,
+  Type = "Best Subset BIC"
+)
+
+plot_data_c <- data.frame(
+  Model_Complexity = log(lasso_cv$lambda),
+  Error = lasso_cv$cvm,
+  SE = lasso_cv$cvsd,
+  Type = "Lasso CV Error"
+)
+
+plot_data_d <- data.frame(
+  Model_Complexity = log(lasso_fit$lambda),
+  Error = test_errors_lasso_bic2 ,
+  SE = test_error_lasso_bic_se2,
+  Type = "Lasso BIC"
+)
+
+plot_a <- ggplot(plot_data_a, aes(x = Model_Complexity, y = Error)) +
+  geom_line(size = 1.2, color = "red") +
+  geom_errorbar(aes(ymin = Error - SE, ymax = Error + SE), width = 0.2, color = "red") +
+  geom_vline(xintercept = best_k_cv, col = "purple", linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Best Subset CV Error", x = "Number of Predictors", y = "Cross-Validation Error")
+
+plot_b <- ggplot(plot_data_b, aes(x = Model_Complexity, y = Error)) +
+  geom_line(size = 1.2, color = "blue") +
+  geom_errorbar(aes(ymin = Error - SE, ymax = Error + SE), width = 0.2, color = "red") +
+  geom_vline(xintercept = best_k_bic, col = "purple", linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Best Subset BIC", x = "Number of Predictors", y = "BIC") 
+
+plot_c <- ggplot(plot_data_c, aes(x = Model_Complexity, y = Error)) +
+  geom_line(size = 1.2, color = "green") +
+  geom_errorbar(aes(ymin = Error - SE, ymax = Error + SE), width = 0.2, color = "green") +
+  geom_vline(xintercept = log(best_lambda_cv), col = "purple", linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Lasso CV Error", x = "log(lambda)", y = "Cross-Validation Error")
+
+plot_d <- ggplot(plot_data_d, aes(x = Model_Complexity, y = Error)) +
+  geom_line(size = 1.2, color = "purple") +
+  geom_errorbar(aes(ymin = Error - SE, ymax = Error + SE), width = 0.2, color = "red") +
+  geom_vline(xintercept = log(best_lambda_bic), col = "purple", linetype = "dashed") +
+  theme_minimal() +
+  labs(title = "Lasso BIC", x = "log(lambda)", y = "BIC") 
+
+combined_plot <- (plot_a | plot_b) / (plot_c | plot_d)
+
+print(combined_plot)
+
+
+```
+Based on the coeffecients of these four method, we can see for four of them, the variables lcavol, lweight and svi shows positive increase respect to the response variable, other variables's coeffecient with non negative sign ahead are not powerful enough to influence the response. Lcp is the only variable that could have a significant negative impact on the response.
+
+Based on the test errors of these four models, as their test errors are very close to each others. BIC lasso model seems to perform the best with the lowest test error and a lowest standard error.
